@@ -4,7 +4,7 @@ extern crate futures;
 
 mod scan_options;
 
-use futures::{StreamExt, SinkExt};
+use futures::{StreamExt};
 use ipnetwork::{Ipv4Network, Ipv6Network};
 use std::collections::{HashMap, HashSet};
 use std::env::args;

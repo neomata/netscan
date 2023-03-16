@@ -1,7 +1,7 @@
 // build.rs
 
 fn main() {
-    // pkg_config::Config::new().probe("C:\\Users\\BishopClark\\IdeaProjects\\neomata\\lan-crawler\\lib\\Packet.lib").unwrap();
+    // pkg_config::Config::new().probe("").unwrap();
     // cc::Build::new()
     //     .file("lib/Packet.lib")
     //     .compile("packet");
