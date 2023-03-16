@@ -1,8 +1,37 @@
+use std::{net::{Ipv4Addr, Ipv6Addr}, fmt::Debug};
+
 pub struct ScanOptions {
-    contains_names: Vec<String>, // match these names in the list of interfaces
-    ipv4: bool,                  // include IP V4 addresses
-    ipv6: bool,                  // include IP V6 addresses
-    loopback: bool,              // include internal loopback addresses
-    local: bool,                 // include non-loopback non-special addresses
-    lan: bool                    // include addresses that pair to a gateway address
+    pub pool: usize,
+    pub wait: f64,
+    pub prefix: Option<u8>,
+    pub subnet_v4: Option<Ipv4Addr>,
+    pub subnet_v6: Option<Ipv6Addr>,
+}
+
+impl Debug for ScanOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ScanOptions")
+            .field("pool", &self.pool)
+            .field("wait", &self.wait)
+            .field("prefix", &self.prefix)
+            .field("subnet_v4", &self.subnet_v4)
+            .field("subnet_v6", &self.subnet_v6)
+            .finish()
+    }
+}
+
+impl Copy for ScanOptions {
+
+}
+
+impl Clone for ScanOptions {
+    fn clone(&self) -> Self {
+       ScanOptions {
+            pool: self.pool,
+            wait: self.wait,
+            prefix: self.prefix,
+            subnet_v4: self.subnet_v4,
+            subnet_v6: self.subnet_v6,
+        } 
+    }
 }
