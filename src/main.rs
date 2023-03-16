@@ -50,16 +50,19 @@ fn main() {
                 } else {
                     panic!("Thread pool size needs to be a positive whole number");
                 },
+
                 [key, val] if key == "-wait" => if let Ok(wait) = val.parse::<f64>() {
                     options.wait = wait;
                 } else {
                     panic!("Wait time (ms) needs to be a positive number");
                 },
+
                 [key, val] if key == "-prefix" => if let Ok(prefix) = val.parse::<u8>() {
                     options.prefix = Some(prefix);
                 } else {
                     panic!("Prefix needs to be a number [0, 32] inclusive");
                 },
+
                 [key, val] if key == "-subnet" => if let Ok(subnet) = val.parse::<Ipv4Addr>() {
                     options.subnet_v4 = Some(subnet);
                 } else if let Ok(subnet) = val.parse::<Ipv6Addr>() { 
@@ -67,6 +70,7 @@ fn main() {
                 } else {
                     panic!("Subnet needs to be a valid IP Address");
                 },
+
                 [ip] => { return ip.to_string(); },
                 _ => panic!("Unrecognized optional parameter")
             }
@@ -75,14 +79,15 @@ fn main() {
         panic!("Netscan can only accept one IP address");
     } 
 
-    fn peers(input_ip: String, options: ScanOptions) -> Vec<String> {
+    fn peers(input_ip: String, options: ScanOptions) {
         let pool = ThreadPool::builder().pool_size(options.pool).create().expect("Unable to create thread pool");
-        let channel = unbounded::<String>();
-        let mut sender = channel.0;
-        let mut receiver = channel.1;
+        let (sender, receiver) = unbounded::<String>();
+
         let raw_interfaces = default_net::get_interfaces();
+
         let mut ipv4_networks: HashMap<Ipv4Addr, Ipv4Network> = HashMap::new();
         let mut ipv6_networks: HashMap<Ipv6Addr, Ipv6Network> = HashMap::new();
+
         for interface in raw_interfaces {
             for ip in &interface.ipv4[..] {
                 let network = ipnetwork::Ipv4Network::new(ip.addr, ip.prefix_len).expect(&format!("Unable to acquire network from IP: {} and prefix: {}", ip.addr, ip.prefix_len));
@@ -98,10 +103,12 @@ fn main() {
         let ipv4 = input_ip.parse::<Ipv4Addr>();
         let ipv6 = input_ip.parse::<Ipv6Addr>();
 
-        let mut reach: Vec<String> = Vec::with_capacity(256);
-
         if let Ok(ip) = ipv4 {
             match ipv4_networks.get(&ip) {
+
+                /*
+                 * Input IP assigned to interface, ignore optional params -prefix and -subnet
+                 */ 
                 Some(network) => {
                     let processor = async {
                         network.iter().map(|host| ping_command(host, options, sender.clone()))
@@ -112,7 +119,11 @@ fn main() {
                         items.await
                     };
                     futures::executor::block_on(processor);
-                },               
+                },
+
+                /*
+                 * Input IP not assigned to interface, use provided -prefix parameter
+                 */
                 None if options.prefix.is_some() => {
                     let network = Ipv4Network::new(ip, options.prefix.unwrap()).expect(&format!("Unable to acquire network from IP: {} and prefix: {}", ip, options.prefix.unwrap()));
                     let processor = async {
@@ -125,6 +136,10 @@ fn main() {
                     };
                     futures::executor::block_on(processor);
                 },
+
+                /*
+                 * Input IP not assigned to interface, use provided -subnet parameter
+                 */
                 None if options.subnet_v4.is_some() => {
                     let prefix = ipnetwork::ipv4_mask_to_prefix(options.subnet_v4.unwrap()).expect(&format!("Unable to acquire prefix from subnet: {}", options.subnet_v4.unwrap()));
                     let network = Ipv4Network::new(ip, prefix).expect(&format!("Unable to acquire network from IP: {} and prefix: {}", ip, prefix));
@@ -145,7 +160,6 @@ fn main() {
         } else {
             panic!("IP provided is not valid");
         }
-        return reach;
     }
 
     async fn ping_command(host: Ipv4Addr, options: ScanOptions, sender: UnboundedSender<String>) -> () {
@@ -174,10 +188,6 @@ fn main() {
 
     let ip = parse_arguments(arguments, &mut options);
 
-    let reach = peers(ip, options);
-
-    for ip in reach {
-        println!("{ip}");
-    }
+    peers(ip, options);
     
 }
