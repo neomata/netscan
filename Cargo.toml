@@ -10,3 +10,4 @@ edition = "2021"
 default-net = "0.13.1"
 ipnetwork = "0.20.0"
 futures = { version = "0.3.27", features = ["thread-pool"] }
+either = "1.9.0"

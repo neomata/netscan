@@ -8,78 +8,22 @@ use futures::{StreamExt};
 use ipnetwork::{Ipv4Network, Ipv6Network};
 use std::collections::{HashMap, HashSet};
 use std::env::args;
+use std::io::ErrorKind;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::ops::Div;
 use std::env::consts;
 use std::process::{Command};
 use futures::executor::ThreadPool;
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
-use scan_options::ScanOptions;
+use netscan::scan_options::ScanOptions;
 
 fn main() {
 
-    let mut options = ScanOptions {
-        pool: 256,
-        wait: 1000.0,
-        prefix: None,
-        subnet_v4: None,
-        subnet_v6: None,
-    };
-
     // skipping 1 because the executable name is not relevant
-    let arguments: Vec<String> = args().skip(1).collect();
-    fn parse_arguments(arguments: Vec<String>, options: &mut ScanOptions) -> String {
-        let parameters = arguments.clone();
-        let parameter_pairs = parameters.chunks(2);
-        if parameters.is_empty() { panic!("Requires IP address"); }
+    let args: Vec<String> = args().skip(1).collect();
+    let options = ScanOptions::from_arguments(args);
 
-        let keys = arguments.chunks(2).map(|c| c.first()).collect::<Vec<_>>();
-        let mut key_set: HashSet<Option<&String>> = HashSet::with_capacity(4);
-        for key in keys {
-            if !key_set.contains(&key) {
-                key_set.insert(key);
-            } else {
-                panic!("Define optional parameters once")
-            }
-        }
-
-        for pair in parameter_pairs {
-            match pair {
-                [key, val] if key == "-pool" => if let Ok(pool) = val.parse::<usize>() {
-                    options.pool = pool;
-                } else {
-                    panic!("Thread pool size needs to be a positive whole number");
-                },
-
-                [key, val] if key == "-wait" => if let Ok(wait) = val.parse::<f64>() {
-                    options.wait = wait;
-                } else {
-                    panic!("Wait time (ms) needs to be a positive number");
-                },
-
-                [key, val] if key == "-prefix" => if let Ok(prefix) = val.parse::<u8>() {
-                    options.prefix = Some(prefix);
-                } else {
-                    panic!("Prefix needs to be a number [0, 32] inclusive");
-                },
-
-                [key, val] if key == "-subnet" => if let Ok(subnet) = val.parse::<Ipv4Addr>() {
-                    options.subnet_v4 = Some(subnet);
-                } else if let Ok(subnet) = val.parse::<Ipv6Addr>() { 
-                    options.subnet_v6 = Some(subnet);
-                } else {
-                    panic!("Subnet needs to be a valid IP Address");
-                },
-
-                [ip] => { return ip.to_string(); },
-                _ => panic!("Unrecognized optional parameter")
-            }
-        }
-        
-        panic!("Netscan can only accept one IP address");
-    } 
-
-    fn peers(input_ip: String, options: ScanOptions) {
+    fn peers(options: ScanOptions) {
         let pool = ThreadPool::builder().pool_size(options.pool).create().expect("Unable to create thread pool");
         let (sender, receiver) = unbounded::<String>();
 
@@ -100,8 +44,13 @@ fn main() {
             }
         }
 
-        let ipv4 = input_ip.parse::<Ipv4Addr>();
-        let ipv6 = input_ip.parse::<Ipv6Addr>();
+
+        let ipv4 = options.ip_address
+            .left()
+            .ok_or_else(|| std::io::Error::new(ErrorKind::NotFound, "scan options does not contain ipv4 address"));
+        let ipv6 = options.ip_address
+            .right()
+            .ok_or_else(|| std::io::Error::new(ErrorKind::NotFound, "scan options does not contain ipv6 address"));
 
         if let Ok(ip) = ipv4 {
             match ipv4_networks.get(&ip) {
@@ -111,7 +60,7 @@ fn main() {
                  */ 
                 Some(network) => {
                     let processor = async {
-                        network.iter().map(|host| ping_command(host, options, sender.clone()))
+                        network.iter().map(|host| ping_host(host, options, sender.clone()))
                             .for_each(|handler| pool.spawn_ok(handler));
                         
                         std::mem::drop(sender);
@@ -127,7 +76,7 @@ fn main() {
                 None if options.prefix.is_some() => {
                     let network = Ipv4Network::new(ip, options.prefix.unwrap()).expect(&format!("Unable to acquire network from IP: {} and prefix: {}", ip, options.prefix.unwrap()));
                     let processor = async {
-                        network.iter().map(|host| ping_command(host, options, sender.clone()))
+                        network.iter().map(|host| ping_host(host, options, sender.clone()))
                             .for_each(|handler| pool.spawn_ok(handler));
                         
                         std::mem::drop(sender);
@@ -144,7 +93,7 @@ fn main() {
                     let prefix = ipnetwork::ipv4_mask_to_prefix(options.subnet_v4.unwrap()).expect(&format!("Unable to acquire prefix from subnet: {}", options.subnet_v4.unwrap()));
                     let network = Ipv4Network::new(ip, prefix).expect(&format!("Unable to acquire network from IP: {} and prefix: {}", ip, prefix));
                     let processor = async {
-                        network.iter().map(|host| ping_command(host, options, sender.clone()))
+                        network.iter().map(|host| ping_host(host, options, sender.clone()))
                             .for_each(|handler| pool.spawn_ok(handler));
                         
                         std::mem::drop(sender);
@@ -162,7 +111,7 @@ fn main() {
         }
     }
 
-    async fn ping_command(host: Ipv4Addr, options: ScanOptions, sender: UnboundedSender<String>) -> () {
+    async fn ping_host(host: Ipv4Addr, options: ScanOptions, sender: UnboundedSender<String>) -> () {
         let mut command = Command::new("ping");
 
         match consts::OS {
@@ -177,17 +126,14 @@ fn main() {
             .output()
             .map(|p| p.status.code())
             .unwrap_or(Option::Some(-1));
-        let status = code;
 
-        if let Some(0) = status {
+        if let Some(0) = code {
             println!("{}", host.to_string());
             sender.unbounded_send(host.to_string())
                 .expect("Internal transmission failed");
         }
     }
 
-    let ip = parse_arguments(arguments, &mut options);
-
-    peers(ip, options);
+    peers(options);
     
 }
